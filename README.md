@@ -82,6 +82,19 @@ in Google Calendar, from your phone, no server involved:
 - **+30 MIN** reads the event's current start/end and pushes both forward half an
   hour — a real reschedule, not just a note on the page.
 
+The connection survives a reload: the token (calendar-scoped, ~1h, this device
+only) is kept in `localStorage`, because the silent re-auth that would avoid
+storing it needs third-party cookies that Safari blocks.
+
+On connect — and on any reload that restores a live token — the page reconciles
+itself against the calendar as it stands right now: quests whose events are
+done or deleted get marked, a moved event shows its new time, and anything
+added since the last build is listed under **SINCE LAST BUILD** in the
+calendar's own words. That's the factual layer only. The prose — headline, log
+lines, which event is worth being a quest — stays as the last rebuild wrote it,
+because writing it means Claude reading the calendar, and a public page can't
+be allowed to trigger that for whoever opens it.
+
 This needs a one-time Google Cloud OAuth Client ID, since the buttons talk to
 Google's Calendar API directly from your browser (no backend to hold a token for
 you). Full steps are in `docs/config.js` — roughly: enable the Calendar API,

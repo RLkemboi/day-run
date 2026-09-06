@@ -217,6 +217,20 @@ body::after {
 .quest-actions button:hover:not(:disabled) { border-color: var(--ember); color: var(--ink); }
 .quest-actions button:disabled { opacity: .5; cursor: default; }
 
+/* Live reconciliation markers — what the calendar says right now, against
+   what this page was built saying. Deliberately quiet: a chip and a dim. */
+.live-chip {
+  margin-left: 10px; font-size: 9px; letter-spacing: .16em; font-weight: 700;
+  color: var(--ink-dim); border: 1px solid var(--line); padding: 2px 6px;
+  white-space: nowrap;
+}
+.live-done { opacity: .45; }
+.live-done .live-chip { color: var(--signal); border-color: rgba(88,214,201,.35); }
+.live-gone { opacity: .4; }
+.live-gone .quest-title, .live-gone .stage-name { text-decoration: line-through; }
+.live-extras { margin-top: 46px; }
+.live-extras .quest { margin-top: 14px; }
+
 /* ── TRIAGE GRID ─────────────────────────────── */
 .grid {
   display: grid; grid-template-columns: 1fr 1fr;
@@ -302,6 +316,10 @@ body::after {
     <div class="sec-label"><span>STAGES</span><i></i></div>
     __STAGES__
   </div>
+
+  <!-- Filled in by the calendar-sync script with anything on today's calendar
+       that postdates this build. Stays empty and hidden otherwise. -->
+  <div id="live-extras" class="live-extras" hidden></div>
 
   __GRID__
 

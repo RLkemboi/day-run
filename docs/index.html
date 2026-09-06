@@ -234,6 +234,20 @@ body::after {
 .quest-actions button:hover:not(:disabled) { border-color: var(--ember); color: var(--ink); }
 .quest-actions button:disabled { opacity: .5; cursor: default; }
 
+/* Live reconciliation markers — what the calendar says right now, against
+   what this page was built saying. Deliberately quiet: a chip and a dim. */
+.live-chip {
+  margin-left: 10px; font-size: 9px; letter-spacing: .16em; font-weight: 700;
+  color: var(--ink-dim); border: 1px solid var(--line); padding: 2px 6px;
+  white-space: nowrap;
+}
+.live-done { opacity: .45; }
+.live-done .live-chip { color: var(--signal); border-color: rgba(88,214,201,.35); }
+.live-gone { opacity: .4; }
+.live-gone .quest-title, .live-gone .stage-name { text-decoration: line-through; }
+.live-extras { margin-top: 46px; }
+.live-extras .quest { margin-top: 14px; }
+
 /* ── TRIAGE GRID ─────────────────────────────── */
 .grid {
   display: grid; grid-template-columns: 1fr 1fr;
@@ -377,6 +391,10 @@ body::after {
     </div>
   </div>
 
+  <!-- Filled in by the calendar-sync script with anything on today's calendar
+       that postdates this build. Stays empty and hidden otherwise. -->
+  <div id="live-extras" class="live-extras" hidden></div>
+
   <div class="r" style="animation-delay:.36s; margin-top:54px"><div class="sec-label"><span>TRIAGE GRID</span><i></i></div><div class="grid">
     <div class="cell boss">
       <div class="rank"><i class="sig"></i><b>BOSS</b></div>
@@ -483,11 +501,44 @@ body::after {
     document.querySelectorAll('.quest-actions').forEach(function (el) { el.hidden = false; });
   }
 
-  // sessionStorage remembers only "this browser has granted before" — never a
-  // token, which always stays in memory and is gone the instant the tab is.
-  var GRANTED_KEY = 'dayrunCalGranted';
-  function rememberGrant() { try { sessionStorage.setItem(GRANTED_KEY, '1'); } catch (e) {} }
-  function everGranted() { try { return sessionStorage.getItem(GRANTED_KEY) === '1'; } catch (e) { return false; } }
+  // The token itself is kept (with its expiry) so a reload doesn't drop the
+  // connection. Silent re-auth via a hidden iframe is not an option here:
+  // Safari blocks the third-party cookies it depends on, which is exactly why
+  // reloading used to disconnect. Scope is calendar.events only, it expires in
+  // about an hour, and it never leaves this device.
+  var TOKEN_KEY = 'dayrunCalToken';
+
+  function saveToken(token, expiresIn) {
+    try {
+      localStorage.setItem(TOKEN_KEY, JSON.stringify({
+        t: token,
+        // 60s of headroom so a token can't expire mid-request
+        exp: Date.now() + ((parseInt(expiresIn, 10) || 3600) - 60) * 1000
+      }));
+    } catch (e) {}
+  }
+
+  function loadToken() {
+    try {
+      var o = JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null');
+      if (!o || !o.t || !o.exp || Date.now() >= o.exp) return null;
+      return o.t;
+    } catch (e) { return null; }
+  }
+
+  function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+
+  function disconnect(msg) {
+    accessToken = null;
+    clearToken();
+    setStatus(msg || 'CONNECT CALENDAR', false);
+  }
+
+  function onConnected() {
+    setStatus('CALENDAR CONNECTED', true);
+    revealActions();
+    syncLive();
+  }
 
   function ready() {
     if (!CLIENT_ID || !window.google || !google.accounts || !google.accounts.oauth2) {
@@ -500,58 +551,48 @@ body::after {
       callback: function (resp) {
         if (resp && resp.access_token) {
           accessToken = resp.access_token;
-          setStatus('CALENDAR CONNECTED', true);
-          rememberGrant();
-          revealActions();
-        } else if (!everGranted()) {
-          // A failed silent attempt with no prior grant on this device is
-          // expected (never connected yet) — leave the button as an invite.
-          setStatus('CONNECT CALENDAR', false);
+          saveToken(resp.access_token, resp.expires_in);
+          onConnected();
         }
       }
     });
-    setStatus('CONNECT CALENDAR', false);
     if (btn) btn.disabled = false;
-    // A page reload loses the in-memory token but not Google's own consent —
-    // if this browser connected before, reclaim a token with no popup at all.
-    if (everGranted()) tokenClient.requestAccessToken({ prompt: 'none' });
+    if (!accessToken) setStatus('CONNECT CALENDAR', false);
   }
-
-  window.addEventListener('load', function () {
-    var tries = 0;
-    (function poll() {
-      if (window.google && google.accounts && google.accounts.oauth2) return ready();
-      if (++tries > 40) return setStatus('CALENDAR SYNC UNAVAILABLE', false);
-      setTimeout(poll, 125);
-    })();
-  });
 
   if (btn) btn.addEventListener('click', function () {
     if (!tokenClient) return;
     tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
   });
 
-  function api(calId, eventId, opts) {
-    return fetch(
-      'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) +
-      '/events/' + encodeURIComponent(eventId),
-      opts
-    ).then(function (r) {
-      if (!r.ok) throw new Error('calendar api ' + r.status);
-      return r.json();
-    });
+  // ── talking to the calendar ─────────────────────────────────────────────
+  function authed(extra) {
+    var h = { 'Authorization': 'Bearer ' + accessToken };
+    if (extra) for (var k in extra) h[k] = extra[k];
+    return h;
+  }
+
+  function handle(r) {
+    if (r.status === 401) { disconnect('RECONNECT CALENDAR'); throw new Error('token expired'); }
+    if (!r.ok) throw new Error('calendar api ' + r.status);
+    return r.json();
+  }
+
+  function eventUrl(calId, eventId) {
+    return 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) +
+           '/events/' + encodeURIComponent(eventId);
   }
 
   function patchEvent(calId, eventId, body) {
-    return api(calId, eventId, {
+    return fetch(eventUrl(calId, eventId), {
       method: 'PATCH',
-      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      headers: authed({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body)
-    });
+    }).then(handle);
   }
 
   function shiftEvent(calId, eventId, minutes) {
-    return api(calId, eventId, { headers: { 'Authorization': 'Bearer ' + accessToken } })
+    return fetch(eventUrl(calId, eventId), { headers: authed() }).then(handle)
       .then(function (ev) {
         if (!ev.start.dateTime) throw new Error('all-day event');
         var s = new Date(ev.start.dateTime), e = new Date(ev.end.dateTime);
@@ -564,6 +605,133 @@ body::after {
       });
   }
 
+  // ── live reconciliation ─────────────────────────────────────────────────
+  // Everything below treats calendar text as data: summaries are escaped
+  // before they ever touch innerHTML, exactly as the Python renderer does.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  function dayBounds() {
+    // Today as it reads on a Nairobi wall clock (fixed UTC+3, no DST) — the
+    // same day the rebuild renders, whatever timezone this phone is in.
+    var d = new Date(Date.now() + 3 * 3600 * 1000);
+    var ymd = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+    return { min: ymd + 'T00:00:00+03:00', max: ymd + 'T23:59:59+03:00' };
+  }
+
+  function clockOf(iso) {
+    try {
+      return new Date(iso).toLocaleTimeString('en-US',
+        { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Nairobi' });
+    } catch (e) { return ''; }
+  }
+
+  function timeLabel(ev) {
+    if (!ev.start || !ev.start.dateTime) return 'ALL DAY';
+    return (clockOf(ev.start.dateTime) + '–' + clockOf(ev.end.dateTime)).toUpperCase();
+  }
+
+  // A stage contains its quests, so the head (and any existing chip) has to be
+  // looked up by panel type and scoped to that header — searching the whole
+  // panel would let a routine reach down into one of its own quests.
+  function headOf(panel) {
+    return panel.classList.contains('quest')
+      ? panel.querySelector('.quest-head')
+      : panel.querySelector('.stage-name');
+  }
+
+  function chip(panel, text) {
+    var head = headOf(panel);
+    if (!head) return;
+    var el = head.querySelector('.live-chip');
+    if (!text) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('span');
+      el.className = 'live-chip';
+      head.appendChild(el);
+    }
+    el.textContent = text;
+  }
+
+  function panelFor(el) { return el.closest('.quest') || el.closest('.stage'); }
+
+  function syncLive() {
+    if (!accessToken) return;
+    var b = dayBounds();
+    var url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events' +
+      '?timeMin=' + encodeURIComponent(b.min) +
+      '&timeMax=' + encodeURIComponent(b.max) +
+      '&singleEvents=true&orderBy=startTime&maxResults=50';
+    fetch(url, { headers: authed() }).then(handle).then(reconcile).catch(function (err) {
+      console.error(err);
+    });
+  }
+
+  function reconcile(data) {
+    var items = (data && data.items) || [];
+    var byId = {};
+    items.forEach(function (ev) { byId[ev.id] = ev; });
+
+    var known = {};
+    document.querySelectorAll('[data-event-id]').forEach(function (el) {
+      var id = el.getAttribute('data-event-id');
+      known[id] = true;
+      var panel = panelFor(el);
+      if (!panel) return;
+      // These marker classes are deliberately not done/live/next — those
+      // belong to the clock script, which strips any it doesn't own.
+      panel.classList.remove('live-done', 'live-gone');
+      var ev = byId[id];
+      if (!ev || ev.status === 'cancelled') {
+        panel.classList.add('live-gone');
+        chip(panel, 'OFF THE CALENDAR');
+        return;
+      }
+      var p = ev.extendedProperties && ev.extendedProperties.private;
+      if (p && p.dayrunDone === '1') {
+        panel.classList.add('live-done');
+        chip(panel, 'DONE');
+      } else {
+        // A quest shows the event's current time (so a moved one reads true);
+        // a routine already prints its range, so it stays unmarked when normal.
+        chip(panel, panel.classList.contains('quest') ? timeLabel(ev) : '');
+      }
+    });
+
+    renderExtras(items.filter(function (ev) {
+      return !known[ev.id] && ev.status !== 'cancelled' && ev.start && ev.start.dateTime;
+    }));
+
+    var n = new Date();
+    setStatus('SYNCED ' + clockOf(n.toISOString()).toUpperCase(), true);
+  }
+
+  // Anything on the calendar today that the last rebuild didn't know about.
+  // Listed plainly, in the calendar's own words — no invented framing, since
+  // writing the brief's prose is the rebuild's job, not this script's.
+  function renderExtras(extras) {
+    var host = document.getElementById('live-extras');
+    if (!host) return;
+    if (!extras.length) { host.hidden = true; host.innerHTML = ''; return; }
+    host.innerHTML = '<div class="sec-label"><span>SINCE LAST BUILD</span><i></i></div>' +
+      extras.map(function (ev) {
+        return '<div class="quest">' +
+          '<div class="quest-head"><span class="quest-sig">◆ NEW</span>' +
+          '<span class="quest-title">' + esc(ev.summary || '(untitled)') + '</span></div>' +
+          '<div class="quest-body">' + esc(timeLabel(ev)) + ' — on your calendar, added since this page was last built.</div>' +
+          '<div class="quest-actions" data-event-id="' + esc(ev.id) + '" data-calendar-id="primary">' +
+          '<button data-cal-action="done">✓ DONE</button>' +
+          '<button data-cal-action="snooze">+30 MIN</button></div></div>';
+      }).join('');
+    host.hidden = false;
+  }
+
+  // ── actions ─────────────────────────────────────────────────────────────
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-cal-action]');
     if (!t) return;
@@ -578,13 +746,26 @@ body::after {
       ? patchEvent(calId, eventId, { extendedProperties: { private: { dayrunDone: '1' } } })
       : shiftEvent(calId, eventId, 30);
     op.then(function () {
-      if (action === 'done') { holder.style.opacity = '.4'; t.textContent = 'DONE'; }
-      else { t.disabled = false; t.textContent = '+30 MIN \u2713'; setTimeout(function () { t.textContent = '+30 MIN'; }, 1500); }
+      t.disabled = false;
+      syncLive();  // re-read the calendar so the page shows what actually landed
     }).catch(function (err) {
       t.disabled = false;
       t.textContent = 'RETRY';
       console.error(err);
     });
+  });
+
+  window.addEventListener('load', function () {
+    // A stored, unexpired token means this device is still connected — restore
+    // it before Google's script even loads, so a reload never looks logged out.
+    var stored = loadToken();
+    if (stored) { accessToken = stored; onConnected(); }
+    var tries = 0;
+    (function poll() {
+      if (window.google && google.accounts && google.accounts.oauth2) return ready();
+      if (++tries > 40) { if (!accessToken) setStatus('CALENDAR SYNC UNAVAILABLE', false); return; }
+      setTimeout(poll, 125);
+    })();
   });
 })();
 </script>
