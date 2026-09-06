@@ -15,4 +15,4 @@
 //      -> Authorized JavaScript origins: https://rlkemboi.github.io
 //      -> Create, then copy the Client ID it gives you.
 //   5. Paste it below, replacing the placeholder, and commit.
-window.DAYRUN_GOOGLE_CLIENT_ID = "";
+window.DAYRUN_GOOGLE_CLIENT_ID = "634826907401-es19k3cgmhqnj06lk54c93m7tpe398gk.apps.googleusercontent.com";
