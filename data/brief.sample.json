@@ -1,0 +1,90 @@
+{
+  "_comment": "Demo payload — fictional day, no personal data. Real briefs are written to data/brief.json (gitignored). See README.",
+  "run": 62,
+  "date": "TUE · 03 MAR 2026",
+  "now": 10.4,
+  "headline": "Two blocks carry the whole day, and the afternoon is yours to spend.",
+  "emphasis": "yours to spend",
+  "stages": [
+    {
+      "name": "DEEP WORK", "tag": "FOCUS", "s": 6.5, "e": 8.5, "load": 0.75,
+      "log": "Opens the day for one task, uninterrupted. Nothing else is scheduled against it.",
+      "quests": []
+    },
+    {
+      "name": "EXECUTION BLOCK", "tag": "BUILD", "s": 9.0, "e": 12.0, "load": 1.0,
+      "log": "Three hours on revenue work — the longest uninterrupted run on the board.",
+      "quests": [
+        {
+          "sig": "OBJECTIVE",
+          "title": "Ship the pricing page rewrite",
+          "body": "Top of your objectives list this week, and the only item on it with a date attached."
+        },
+        {
+          "sig": "ASK",
+          "title": "Contract redline needs a yes or no",
+          "body": "From your co-founder on Sunday — they're blocked until you confirm the payment terms clause."
+        }
+      ]
+    },
+    {
+      "name": "CONTROL BLOCK", "tag": "PLAN", "s": 15.0, "e": 16.5, "load": 0.55,
+      "log": "Planning and life admin, with tomorrow's review sitting just past it.",
+      "quests": [
+        {
+          "sig": "PREP",
+          "title": "Quarter review lands tomorrow at nine",
+          "body": "You're the organizer, so the prep is the agenda you'll open with — three things that moved, one that didn't."
+        }
+      ]
+    },
+    {
+      "name": "FLEX BLOCK", "tag": "FLOW", "s": 18.0, "e": 19.5, "load": 0.3,
+      "log": "Light and creative, marked free — the one stretch that can be traded away without cost.",
+      "quests": []
+    },
+    {
+      "name": "UNWIND BLOCK", "tag": "REST", "s": 22.0, "e": 23.0, "load": 0.1,
+      "log": "Closes the run, easing toward sleep.",
+      "quests": []
+    }
+  ],
+  "cells": [
+    {
+      "rank": "BOSS", "axis": "URGENT · IMPORTANT",
+      "items": [
+        {
+          "title": "Insurance renewal closes today",
+          "body": "A reminder in your inbox from last Tuesday — cover lapses at midnight if the form isn't back."
+        }
+      ]
+    },
+    {
+      "rank": "MAIN QUEST", "axis": "IMPORTANT · NOT URGENT",
+      "items": [
+        {
+          "title": "Draft the case study you keep deferring",
+          "body": "On your objectives list since January, with no deadline attached and no routine it fits."
+        }
+      ]
+    },
+    {
+      "rank": "SIDE QUEST", "axis": "URGENT · NOT IMPORTANT",
+      "items": [
+        {
+          "title": "Two RSVPs expire tonight",
+          "body": "Both are optional events next month; either answer takes a line."
+        }
+      ]
+    },
+    {
+      "rank": "ARCHIVE", "axis": "NEITHER",
+      "items": [
+        {
+          "title": "Server migration finished overnight",
+          "body": "The thread you were copied on closed itself — ops confirmed cutover at 04:12, nothing pending."
+        }
+      ]
+    }
+  ]
+}

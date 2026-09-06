@@ -1,0 +1,13 @@
+# The real brief payload — your inbox, your routines, your day.
+# Kept out of git so nothing personal lands here by accident.
+# Note: docs/index.html is BUILT from it, so the rendered page does carry that
+# content once you deploy. See the privacy note in README.md.
+data/brief.json
+data/*.local.json
+
+# Build noise
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+*.log

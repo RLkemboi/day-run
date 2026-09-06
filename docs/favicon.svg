@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="glow" cx="18%" cy="12%" r="82%">
+      <stop offset="0%" stop-color="#F2793D" stop-opacity=".34"/>
+      <stop offset="55%" stop-color="#F2793D" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#F2793D" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="emberGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="12" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="nodeGlow" x="-90%" y="-90%" width="280%" height="280%">
+      <feGaussianBlur stdDeviation="16" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="#0B0E14"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+
+  <!-- dim trail ahead -->
+  <path d="M 330,178 C 372,168 404,186 436,232"
+        fill="none" stroke="#2C3647" stroke-width="22" stroke-linecap="round"/>
+
+  <!-- lit trail behind -->
+  <path d="M 74,392 C 140,384 178,318 224,258 C 262,208 292,186 330,178"
+        fill="none" stroke="#F2793D" stroke-width="26" stroke-linecap="round"
+        filter="url(#emberGlow)"/>
+
+  <!-- now node -->
+  <circle cx="330" cy="178" r="52" fill="none" stroke="#58D6C9" stroke-width="6" opacity=".3"/>
+  <circle cx="330" cy="178" r="34" fill="#0B0E14" stroke="#58D6C9" stroke-width="14"
+          filter="url(#nodeGlow)"/>
+  <circle cx="330" cy="178" r="12" fill="#58D6C9"/>
+</svg>
