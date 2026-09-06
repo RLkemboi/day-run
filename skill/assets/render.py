@@ -19,7 +19,8 @@ Payload shape — times are floats in 24h decimal hours (9.5 == 9:30 AM):
   "stages": [
     {"name": "CONTROL BLOCK", "tag": "PLAN", "s": 15.5, "e": 17.0, "load": 0.55,
      "log": "One sentence earned from the calendar.",
-     "quests": [{"sig": "TIME-BOUND", "title": "≤10 words", "body": "One sentence."}]}
+     "quests": [{"sig": "TIME-BOUND", "title": "≤10 words", "body": "One sentence.",
+                 "event_id": "abc123", "calendar_id": "primary"}]}
   ],
   "cells": [                        // omit entirely to drop the grid
     {"rank": "BOSS", "axis": "URGENT · IMPORTANT", "items": [{"title": "...", "body": "..."}]},
@@ -31,6 +32,12 @@ Payload shape — times are floats in 24h decimal hours (9.5 == 9:30 AM):
 
 `load` is 0..1 (how demanding the routine is) and sets the node's height on the
 trail. Leave it out and it's inferred from duration.
+
+`event_id`/`calendar_id` on a quest are optional and only make sense for a
+quest sourced from a real calendar event (a TIME-BOUND quest, not an
+objective/ask/prep one) — in --pwa builds they attach Done/+30min controls
+that write back to that exact event via the Google Calendar API, straight
+from the browser. Omit both for quests with nothing to write back to.
 """
 
 import base64, html, json, os, sys
@@ -48,12 +55,132 @@ PWA_HEAD = """<link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<script src="config.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});
     });
   }
+</script>"""
+
+# Connect button sitting in the HUD row. Disabled until config.js + the Google
+# script both check out, so a broken setup fails visibly instead of dead-clicking.
+CAL_UI = '<button id="cal-connect" class="cal-connect" disabled>CALENDAR SYNC…</button>'
+
+# Real write-back to Google Calendar, straight from the browser — no backend.
+# Uses Google Identity Services' token-client flow (a public, PKCE-style client;
+# the Client ID in config.js is not a secret). Only quests carrying a
+# data-event-id (real calendar events the daily rebuild attached an id to) get
+# action buttons; objectives/asks/prep quests have nothing to write back to.
+CAL_JS = """<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+(function () {
+  var CLIENT_ID = window.DAYRUN_GOOGLE_CLIENT_ID || '';
+  var SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+  var tokenClient = null, accessToken = null;
+  var btn = document.getElementById('cal-connect');
+
+  function setStatus(text, connected) {
+    if (!btn) return;
+    btn.textContent = text;
+    btn.classList.toggle('connected', !!connected);
+  }
+
+  function revealActions() {
+    document.querySelectorAll('.quest-actions').forEach(function (el) { el.hidden = false; });
+  }
+
+  function ready() {
+    if (!CLIENT_ID || !window.google || !google.accounts || !google.accounts.oauth2) {
+      setStatus('CALENDAR SYNC UNCONFIGURED', false);
+      return;
+    }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPE,
+      callback: function (resp) {
+        if (resp && resp.access_token) {
+          accessToken = resp.access_token;
+          setStatus('CALENDAR CONNECTED', true);
+          revealActions();
+        }
+      }
+    });
+    setStatus('CONNECT CALENDAR', false);
+    if (btn) btn.disabled = false;
+  }
+
+  window.addEventListener('load', function () {
+    var tries = 0;
+    (function poll() {
+      if (window.google && google.accounts && google.accounts.oauth2) return ready();
+      if (++tries > 40) return setStatus('CALENDAR SYNC UNAVAILABLE', false);
+      setTimeout(poll, 125);
+    })();
+  });
+
+  if (btn) btn.addEventListener('click', function () {
+    if (!tokenClient) return;
+    tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+  });
+
+  function api(calId, eventId, opts) {
+    return fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) +
+      '/events/' + encodeURIComponent(eventId),
+      opts
+    ).then(function (r) {
+      if (!r.ok) throw new Error('calendar api ' + r.status);
+      return r.json();
+    });
+  }
+
+  function patchEvent(calId, eventId, body) {
+    return api(calId, eventId, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  }
+
+  function shiftEvent(calId, eventId, minutes) {
+    return api(calId, eventId, { headers: { 'Authorization': 'Bearer ' + accessToken } })
+      .then(function (ev) {
+        if (!ev.start.dateTime) throw new Error('all-day event');
+        var s = new Date(ev.start.dateTime), e = new Date(ev.end.dateTime);
+        s.setMinutes(s.getMinutes() + minutes);
+        e.setMinutes(e.getMinutes() + minutes);
+        return patchEvent(calId, eventId, {
+          start: { dateTime: s.toISOString(), timeZone: ev.start.timeZone },
+          end: { dateTime: e.toISOString(), timeZone: ev.end.timeZone }
+        });
+      });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-cal-action]');
+    if (!t) return;
+    var holder = t.closest('[data-event-id]');
+    if (!holder) return;
+    if (!accessToken) { setStatus('CONNECT CALENDAR FIRST', false); return; }
+    var calId = holder.getAttribute('data-calendar-id') || 'primary';
+    var eventId = holder.getAttribute('data-event-id');
+    var action = t.getAttribute('data-cal-action');
+    t.disabled = true;
+    var op = action === 'done'
+      ? patchEvent(calId, eventId, { extendedProperties: { private: { dayrunDone: '1' } } })
+      : shiftEvent(calId, eventId, 30);
+    op.then(function () {
+      if (action === 'done') { holder.style.opacity = '.4'; t.textContent = 'DONE'; }
+      else { t.disabled = false; t.textContent = '+30 MIN \\u2713'; setTimeout(function () { t.textContent = '+30 MIN'; }, 1500); }
+    }).catch(function (err) {
+      t.disabled = false;
+      t.textContent = 'RETRY';
+      console.error(err);
+    });
+  });
+})();
 </script>"""
 
 
@@ -148,12 +275,26 @@ def build_route(stages, now):
 
 
 # ── markup ────────────────────────────────────────────────────────────────
-def render_stages(stages):
+def render_quest_actions(q, pwa):
+    """A quest tied to a real calendar event (event_id set) gets Done/+30min
+    controls that write straight back to that event. Hidden until the PWA's
+    calendar-sync script confirms a connection; nothing renders in a portable,
+    non-pwa export or for quests with no source event to act on."""
+    if not pwa or not q.get("event_id"):
+        return ""
+    return (f'<div class="quest-actions" hidden data-event-id="{esc(q["event_id"])}" '
+            f'data-calendar-id="{esc(q.get("calendar_id", "primary"))}">'
+            f'<button data-cal-action="done">✓ DONE</button>'
+            f'<button data-cal-action="snooze">+30 MIN</button></div>')
+
+
+def render_stages(stages, pwa=False):
     out = []
     for i, s in enumerate(stages, 1):
         quests = "".join(f'''<div class="quest">
           <div class="quest-head"><span class="quest-sig">◆ {esc(q.get("sig", "QUEST"))}</span><span class="quest-title">{esc(q["title"])}</span></div>
           <div class="quest-body">{q["body"] if q.get("html") else esc(q["body"])}</div>
+          {render_quest_actions(q, pwa)}
         </div>''' for q in s.get("quests", []))
         out.append(f'''
     <div class="stage {s["_state"]}">
@@ -224,6 +365,8 @@ def main():
 
     out = (tpl.replace("__FONT_B64__", font_b64)
               .replace("__PWA_HEAD__", PWA_HEAD if pwa else "")
+              .replace("__CAL_UI__", CAL_UI if pwa else "")
+              .replace("__CAL_JS__", CAL_JS if pwa else "")
               .replace("__RUN__", str(data.get("run", "")))
               .replace("__DATE__", esc(data.get("date", "")))
               .replace("__HEADLINE__", render_headline(data["headline"], data.get("emphasis")))
@@ -231,7 +374,7 @@ def main():
               .replace("__ELAPSED__", f"{elapsed:.1f}")
               .replace("__NOWMARK__", nowmark)
               .replace("__NODES__", nodes)
-              .replace("__STAGES__", render_stages(stages))
+              .replace("__STAGES__", render_stages(stages, pwa))
               .replace("__GRID__", grid)
               .replace("__PIPS__", pips)
               .replace("__STATS__", stats)

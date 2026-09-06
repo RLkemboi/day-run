@@ -16,6 +16,7 @@ It installs to a phone home screen with its own icon and opens like an app.
 | `docs/index.html` | The brief itself: one self-contained file, fonts inlined, no CDN. |
 | `docs/manifest.webmanifest` | Name, colours and icons that make it installable. |
 | `docs/sw.js` | Service worker. Network-first, cache-fallback — opens on bad signal. |
+| `docs/config.js` | Your Google OAuth Client ID for the in-app calendar-sync buttons. |
 | `skill/` | The Claude skill that gathers the day and writes the payload. |
 | `skill/assets/render.py` | Turns a JSON payload into the page. Owns all the geometry. |
 | `skill/assets/template.html` | The design system: tokens, HUD, route, stages, grid, motion. |
@@ -41,6 +42,8 @@ python3 skill/assets/render.py data/brief.json docs/index.html --pwa   # + manif
 
 Payload shape is documented in the docstring at the top of `render.py`. Times are
 decimal hours (`9.5` = 9:30 AM), `load` is 0–1 and sets a routine's height on the ridge.
+A quest sourced from a real calendar event can also carry `event_id` / `calendar_id` —
+see "Calendar sync from the PWA" below.
 
 ## Deploying
 
@@ -57,14 +60,38 @@ Your app lives at `https://<user>.github.io/day-run/`.
 - **Android Chrome** — menu → Install app / Add to Home screen. Uses the maskable
   icon so it adapts to whatever shape the launcher wants.
 
-## The daily refresh
+## The refresh
 
-The Claude scheduled task runs at 9 AM, reads the calendar, inbox and objectives
-list, writes `data/brief.json`, rebuilds `docs/index.html` and pushes. Pages
-redeploys, and the icon on your home screen opens onto today.
+A Claude Routine fires every 6 hours (9 AM / 3 PM / 9 PM / 3 AM Africa/Nairobi),
+reads the calendar, inbox and objectives list, writes `data/brief.json`, rebuilds
+`docs/index.html` and pushes to `main`. Pages redeploys, and the icon on your
+home screen opens onto the latest run — including anything you changed from the
+PWA itself since the last refresh.
 
 The service worker serves the last-fetched copy when there's no signal, so the
 brief is still there on a train or in a lift.
+
+## Calendar sync from the PWA
+
+Quests sourced from a real calendar event (not an objective or an email ask) get
+two buttons — **✓ DONE** and **+30 MIN** — that write straight back to that event
+in Google Calendar, from your phone, no server involved:
+
+- **DONE** sets a private extended property (`dayrunDone`) on the event. The next
+  refresh sees it and drops the quest instead of re-surfacing it.
+- **+30 MIN** reads the event's current start/end and pushes both forward half an
+  hour — a real reschedule, not just a note on the page.
+
+This needs a one-time Google Cloud OAuth Client ID, since the buttons talk to
+Google's Calendar API directly from your browser (no backend to hold a token for
+you). Full steps are in `docs/config.js` — roughly: enable the Calendar API,
+create an OAuth consent screen kept in **Testing** mode with only your own email
+as a test user (this is what stops any other visitor to this public page from
+being able to connect *their* calendar), create a Web application OAuth client
+scoped to `https://<user>.github.io`, and paste the Client ID into `config.js`.
+
+Until that's done, the HUD button reads `CALENDAR SYNC UNCONFIGURED` and nothing
+else changes — the rest of the app works the same either way.
 
 ## A note on privacy before you deploy
 

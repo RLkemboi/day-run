@@ -13,6 +13,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<script src="config.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
@@ -114,6 +115,14 @@ body::after {
 .pip { width: 4px; height: 13px; background: var(--line-hot); }
 .pip.on { background: var(--ember); box-shadow: 0 0 8px rgba(242,121,61,.55); }
 .hud-pct { font-size: 11px; letter-spacing: .16em; color: var(--ink-soft); min-width: 92px; text-align: right; }
+.cal-connect {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em; font-weight: 700;
+  color: var(--ink-dim); background: transparent; border: 1px solid var(--line);
+  padding: 5px 10px; cursor: pointer; white-space: nowrap;
+}
+.cal-connect:hover:not(:disabled) { border-color: var(--ember); color: var(--ink); }
+.cal-connect:disabled { cursor: default; opacity: .55; }
+.cal-connect.connected { color: var(--signal); border-color: rgba(88,214,201,.4); }
 
 /* ── BRIEFING ────────────────────────────────── */
 .briefing { margin: 46px 0 40px; padding-left: 22px; border-left: 1px solid var(--line); animation-delay: .12s; }
@@ -210,6 +219,14 @@ body::after {
 .quest-title { font-size: 13.5px; font-weight: 700; color: var(--ink); letter-spacing: .02em; }
 .quest-body { font-size: 12.5px; line-height: 1.65; color: var(--ink-soft); }
 .quest-body u { text-decoration: none; border-bottom: 1px solid var(--line-hot); color: var(--ink-soft); }
+.quest-actions { margin-top: 10px; display: flex; gap: 8px; }
+.quest-actions button {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .14em; font-weight: 700;
+  color: var(--ink-soft); background: transparent; border: 1px solid var(--line-hot);
+  padding: 5px 9px; cursor: pointer; transition: border-color .2s, color .2s;
+}
+.quest-actions button:hover:not(:disabled) { border-color: var(--ember); color: var(--ink); }
+.quest-actions button:disabled { opacity: .5; cursor: default; }
 
 /* ── TRIAGE GRID ─────────────────────────────── */
 .grid {
@@ -266,6 +283,7 @@ body::after {
     <div class="hud-id">RUN 62</div>
     <div class="hud-date">TUE · 03 MAR 2026</div>
     <div class="hud-spacer"></div>
+    <button id="cal-connect" class="cal-connect" disabled>CALENDAR SYNC…</button>
     <div class="stat"><b>03</b> QUESTS</div><div class="stat"><b>03</b> TRIAGE</div><div class="stat dim"><b>01</b> ARCHIVED</div>
     <div class="pips"><i class="pip on"></i><i class="pip on"></i><i class="pip on"></i><i class="pip on"></i><i class="pip on"></i><i class="pip on"></i><i class="pip on"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i></div>
     <div class="hud-pct">DAY 26%</div>
@@ -313,9 +331,11 @@ body::after {
       <div class="quest">
           <div class="quest-head"><span class="quest-sig">◆ OBJECTIVE</span><span class="quest-title">Ship the pricing page rewrite</span></div>
           <div class="quest-body">Top of your objectives list this week, and the only item on it with a date attached.</div>
+          
         </div><div class="quest">
           <div class="quest-head"><span class="quest-sig">◆ ASK</span><span class="quest-title">Contract redline needs a yes or no</span></div>
           <div class="quest-body">From your co-founder on Sunday — they&#x27;re blocked until you confirm the payment terms clause.</div>
+          
         </div>
     </div>
     <div class="stage next">
@@ -328,6 +348,7 @@ body::after {
       <div class="quest">
           <div class="quest-head"><span class="quest-sig">◆ PREP</span><span class="quest-title">Quarter review lands tomorrow at nine</span></div>
           <div class="quest-body">You&#x27;re the organizer, so the prep is the agenda you&#x27;ll open with — three things that moved, one that didn&#x27;t.</div>
+          
         </div>
     </div>
     <div class="stage next">
@@ -381,5 +402,114 @@ body::after {
     </div></div></div>
 
 </div>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+(function () {
+  var CLIENT_ID = window.DAYRUN_GOOGLE_CLIENT_ID || '';
+  var SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+  var tokenClient = null, accessToken = null;
+  var btn = document.getElementById('cal-connect');
+
+  function setStatus(text, connected) {
+    if (!btn) return;
+    btn.textContent = text;
+    btn.classList.toggle('connected', !!connected);
+  }
+
+  function revealActions() {
+    document.querySelectorAll('.quest-actions').forEach(function (el) { el.hidden = false; });
+  }
+
+  function ready() {
+    if (!CLIENT_ID || !window.google || !google.accounts || !google.accounts.oauth2) {
+      setStatus('CALENDAR SYNC UNCONFIGURED', false);
+      return;
+    }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPE,
+      callback: function (resp) {
+        if (resp && resp.access_token) {
+          accessToken = resp.access_token;
+          setStatus('CALENDAR CONNECTED', true);
+          revealActions();
+        }
+      }
+    });
+    setStatus('CONNECT CALENDAR', false);
+    if (btn) btn.disabled = false;
+  }
+
+  window.addEventListener('load', function () {
+    var tries = 0;
+    (function poll() {
+      if (window.google && google.accounts && google.accounts.oauth2) return ready();
+      if (++tries > 40) return setStatus('CALENDAR SYNC UNAVAILABLE', false);
+      setTimeout(poll, 125);
+    })();
+  });
+
+  if (btn) btn.addEventListener('click', function () {
+    if (!tokenClient) return;
+    tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+  });
+
+  function api(calId, eventId, opts) {
+    return fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) +
+      '/events/' + encodeURIComponent(eventId),
+      opts
+    ).then(function (r) {
+      if (!r.ok) throw new Error('calendar api ' + r.status);
+      return r.json();
+    });
+  }
+
+  function patchEvent(calId, eventId, body) {
+    return api(calId, eventId, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  }
+
+  function shiftEvent(calId, eventId, minutes) {
+    return api(calId, eventId, { headers: { 'Authorization': 'Bearer ' + accessToken } })
+      .then(function (ev) {
+        if (!ev.start.dateTime) throw new Error('all-day event');
+        var s = new Date(ev.start.dateTime), e = new Date(ev.end.dateTime);
+        s.setMinutes(s.getMinutes() + minutes);
+        e.setMinutes(e.getMinutes() + minutes);
+        return patchEvent(calId, eventId, {
+          start: { dateTime: s.toISOString(), timeZone: ev.start.timeZone },
+          end: { dateTime: e.toISOString(), timeZone: ev.end.timeZone }
+        });
+      });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-cal-action]');
+    if (!t) return;
+    var holder = t.closest('[data-event-id]');
+    if (!holder) return;
+    if (!accessToken) { setStatus('CONNECT CALENDAR FIRST', false); return; }
+    var calId = holder.getAttribute('data-calendar-id') || 'primary';
+    var eventId = holder.getAttribute('data-event-id');
+    var action = t.getAttribute('data-cal-action');
+    t.disabled = true;
+    var op = action === 'done'
+      ? patchEvent(calId, eventId, { extendedProperties: { private: { dayrunDone: '1' } } })
+      : shiftEvent(calId, eventId, 30);
+    op.then(function () {
+      if (action === 'done') { holder.style.opacity = '.4'; t.textContent = 'DONE'; }
+      else { t.disabled = false; t.textContent = '+30 MIN \u2713'; setTimeout(function () { t.textContent = '+30 MIN'; }, 1500); }
+    }).catch(function (err) {
+      t.disabled = false;
+      t.textContent = 'RETRY';
+      console.error(err);
+    });
+  });
+})();
+</script>
 </body>
 </html>
