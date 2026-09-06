@@ -91,6 +91,12 @@ CAL_JS = """<script src="https://accounts.google.com/gsi/client" async defer></s
     document.querySelectorAll('.quest-actions').forEach(function (el) { el.hidden = false; });
   }
 
+  // sessionStorage remembers only "this browser has granted before" — never a
+  // token, which always stays in memory and is gone the instant the tab is.
+  var GRANTED_KEY = 'dayrunCalGranted';
+  function rememberGrant() { try { sessionStorage.setItem(GRANTED_KEY, '1'); } catch (e) {} }
+  function everGranted() { try { return sessionStorage.getItem(GRANTED_KEY) === '1'; } catch (e) { return false; } }
+
   function ready() {
     if (!CLIENT_ID || !window.google || !google.accounts || !google.accounts.oauth2) {
       setStatus('CALENDAR SYNC UNCONFIGURED', false);
@@ -103,12 +109,20 @@ CAL_JS = """<script src="https://accounts.google.com/gsi/client" async defer></s
         if (resp && resp.access_token) {
           accessToken = resp.access_token;
           setStatus('CALENDAR CONNECTED', true);
+          rememberGrant();
           revealActions();
+        } else if (!everGranted()) {
+          // A failed silent attempt with no prior grant on this device is
+          // expected (never connected yet) — leave the button as an invite.
+          setStatus('CONNECT CALENDAR', false);
         }
       }
     });
     setStatus('CONNECT CALENDAR', false);
     if (btn) btn.disabled = false;
+    // A page reload loses the in-memory token but not Google's own consent —
+    // if this browser connected before, reclaim a token with no popup at all.
+    if (everGranted()) tokenClient.requestAccessToken({ prompt: 'none' });
   }
 
   window.addEventListener('load', function () {
