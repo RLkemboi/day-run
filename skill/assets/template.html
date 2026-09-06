@@ -131,13 +131,19 @@ body::after {
 .route svg { width: 100%; height: auto; display: block; overflow: visible; }
 .trail-dim { fill: none; stroke: var(--line-hot); stroke-width: 1.5; }
 .trail-hot { fill: none; stroke: var(--ember); stroke-width: 1.75; filter: drop-shadow(0 0 6px rgba(242,121,61,.55)); animation: sweep 1.1s cubic-bezier(.3,.8,.3,1) .35s backwards; }
-.node-done { fill: var(--ember); }
-.node-next { fill: var(--void); stroke: var(--line-hot); stroke-width: 1.5; }
-.node-live { fill: var(--void); stroke: var(--signal); stroke-width: 2; }
-.node-halo { fill: none; stroke: var(--signal); stroke-width: 1; opacity: .45; animation: glow 2.4s ease-in-out infinite; }
+/* One shape per node regardless of state (done/live/next); the state class
+   sits on the wrapping <g> so the live-clock script can retint a node by
+   swapping one class, the same way it already does for .stage. */
+.node-ring { r: 6px; fill: var(--void); stroke: var(--line-hot); stroke-width: 1.5; }
+.node.done .node-ring { r: 6.5px; fill: var(--ember); stroke: none; }
+.node.live .node-ring { r: 8px; fill: var(--void); stroke: var(--signal); stroke-width: 2; }
+.node-halo { fill: none; stroke: var(--signal); stroke-width: 1; opacity: 0; }
+.node.live .node-halo { opacity: .45; animation: glow 2.4s ease-in-out infinite; }
+.node-core { fill: var(--signal); opacity: 0; }
+.node.live .node-core { opacity: 1; }
 .node-cap { font-family: var(--mono); font-size: 9px; letter-spacing: .16em; fill: var(--ink-dim); }
-.node-cap.live { fill: var(--signal); }
-.node-cap.done { fill: var(--ink-soft); }
+.node.live .node-cap-name { fill: var(--signal); }
+.node.done .node-cap-name { fill: var(--ink-soft); }
 .now-rule { stroke: var(--signal); stroke-width: 1; stroke-dasharray: 2 4; opacity: .5; }
 .now-tag { font-family: var(--mono); font-size: 9px; letter-spacing: .2em; fill: var(--signal); }
 
@@ -281,7 +287,7 @@ body::after {
   <!-- ROUTE -->
   <div class="route r">
     <div class="sec-label"><span>RUN ROUTE</span><i></i></div>
-    <div class="route-frame">
+    <div class="route-frame" data-span-s="__SPAN_S__" data-span-e="__SPAN_E__">
       <svg viewBox="0 0 940 178" xmlns="http://www.w3.org/2000/svg">
         <path class="trail-dim" pathLength="100" d="__TRAIL__"/>
         <path class="trail-hot" pathLength="100" stroke-dasharray="__ELAPSED__ 100" d="__TRAIL__"/>
@@ -300,6 +306,7 @@ body::after {
   __GRID__
 
 </div>
+__LIVE_JS__
 __CAL_JS__
 </body>
 </html>

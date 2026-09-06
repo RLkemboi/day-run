@@ -45,6 +45,11 @@ import base64, html, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 CELL_CLASSES = ["boss", "main", "side", "arch"]
 
+# Shared with the client-side live-clock script (LIVE_JS below), which
+# re-derives the same route geometry from data-* attributes using the
+# viewer's real clock — these constants must stay in lockstep with the JS copy.
+ROUTE_X0, ROUTE_X1, ROUTE_XA, ROUTE_XB = 60.0, 880.0, 20.0, 920.0
+
 PWA_HEAD = """<link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0B0E14">
 <meta name="color-scheme" content="dark">
@@ -197,6 +202,73 @@ CAL_JS = """<script src="https://accounts.google.com/gsi/client" async defer></s
 })();
 </script>"""
 
+# Between rebuilds (now hourly, but never instant) the page otherwise shows
+# whatever time it was when it was last built. This recomputes only the
+# clock-driven visual state — which stage/node is done/live/next, the NOW
+# marker, the progress trail, the HUD pips and DAY% — against the viewer's
+# actual current time, on load and every minute. It never touches content
+# (headline, quests, log lines): that stays exactly what the last rebuild
+# wrote, since deciding *what* today's brief says is Claude's job, not a
+# formula a public page can safely run for anyone who opens it.
+LIVE_JS = """<script>
+(function () {
+  var X0 = __X0__, X1 = __X1__, XA = __XA__, XB = __XB__;
+  var route = document.querySelector('.route-frame');
+  var trail = document.querySelector('.trail-hot');
+  var pips = document.querySelector('.pips');
+  var pct = document.querySelector('.hud-pct');
+  var nowmark = document.getElementById('nowmark');
+  var nowRule = document.getElementById('now-rule');
+  var nowTag = document.getElementById('now-tag');
+  if (!route || !trail) return;
+  var spanS = parseFloat(route.dataset.spanS), spanE = parseFloat(route.dataset.spanE);
+
+  function xpos(t) { return X0 + (t - spanS) / Math.max(spanE - spanS, 0.01) * (X1 - X0); }
+
+  // Africa/Nairobi is fixed UTC+3 year-round (no DST) — this is the same
+  // clock the daily rebuild uses, computed from the viewer's own device
+  // clock so it's correct regardless of the phone's local timezone.
+  function nowNairobi() {
+    var d = new Date();
+    return ((d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600) + 3) % 24;
+  }
+
+  function tick() {
+    var now = nowNairobi();
+    var nowX = xpos(now);
+    var elapsed = Math.max(0, Math.min(100, (nowX - XA) / (XB - XA) * 100));
+
+    document.querySelectorAll('[data-s][data-e]').forEach(function (el) {
+      var s = parseFloat(el.dataset.s), e = parseFloat(el.dataset.e);
+      var state = e <= now ? 'done' : (s <= now && now <= e ? 'live' : 'next');
+      el.classList.remove('done', 'live', 'next');
+      el.classList.add(state);
+    });
+
+    trail.setAttribute('stroke-dasharray', elapsed.toFixed(1) + ' 100');
+
+    if (nowmark && nowRule && nowTag) {
+      nowmark.style.display = (elapsed > 0 && elapsed < 100) ? 'block' : 'none';
+      nowRule.setAttribute('x1', nowX.toFixed(1));
+      nowRule.setAttribute('x2', nowX.toFixed(1));
+      nowTag.setAttribute('x', (nowX + 7).toFixed(1));
+    }
+
+    if (pips) {
+      var lit = Math.round(elapsed / 100 * 28);
+      Array.prototype.forEach.call(pips.children, function (pip, k) {
+        pip.classList.toggle('on', k < lit);
+      });
+    }
+    if (pct) pct.textContent = 'DAY ' + Math.round(elapsed) + '%';
+  }
+
+  tick();
+  setInterval(tick, 60000);
+})();
+</script>""".replace("__X0__", str(ROUTE_X0)).replace("__X1__", str(ROUTE_X1)) \
+             .replace("__XA__", str(ROUTE_XA)).replace("__XB__", str(ROUTE_XB))
+
 
 def esc(s):
     return html.escape(str(s), quote=True)
@@ -234,7 +306,7 @@ def catmull_rom(points):
 
 
 def build_route(stages, now):
-    X0, X1, XA, XB = 60.0, 880.0, 20.0, 920.0
+    X0, X1, XA, XB = ROUTE_X0, ROUTE_X1, ROUTE_XA, ROUTE_XB
     span_s = min(s["s"] for s in stages)
     span_e = max(s["e"] for s in stages)
 
@@ -261,31 +333,32 @@ def build_route(stages, now):
     now_x = xpos(now)
     elapsed = max(0.0, min(100.0, (now_x - XA) / (XB - XA) * 100.0))
 
-    nodes, caps = [], []
+    nodes = []
     for s in stages:
         cx, cy = xpos((s["s"] + s["e"]) / 2), s["_y"]
         s["_state"] = "done" if s["e"] <= now else ("live" if s["s"] <= now <= s["e"] else "next")
-        if s["_state"] == "done":
-            nodes.append(f'<circle class="node-done" cx="{cx:.1f}" cy="{cy:.1f}" r="6.5"/>')
-        elif s["_state"] == "live":
-            nodes.append(
-                f'<circle class="node-halo" cx="{cx:.1f}" cy="{cy:.1f}" r="15"/>'
-                f'<circle class="node-live" cx="{cx:.1f}" cy="{cy:.1f}" r="8"/>'
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3" fill="#58D6C9"/>')
-        else:
-            nodes.append(f'<circle class="node-next" cx="{cx:.1f}" cy="{cy:.1f}" r="6"/>')
-        caps.append(
-            f'<text class="node-cap {s["_state"]}" x="{cx:.1f}" y="152" text-anchor="middle">'
+        # One uniform shape per node (halo + ring + core dot) regardless of
+        # state — CSS keyed off the state class on the <g> controls which
+        # parts show. This is what lets the live-clock script simply swap
+        # that one class every minute instead of rebuilding the markup.
+        nodes.append(
+            f'<g class="node {s["_state"]}" data-s="{s["s"]}" data-e="{s["e"]}">'
+            f'<circle class="node-halo" cx="{cx:.1f}" cy="{cy:.1f}" r="15"/>'
+            f'<circle class="node-ring" cx="{cx:.1f}" cy="{cy:.1f}"/>'
+            f'<circle class="node-core" cx="{cx:.1f}" cy="{cy:.1f}" r="3"/>'
+            f'<text class="node-cap node-cap-name" x="{cx:.1f}" y="152" text-anchor="middle">'
             f'{esc(s["name"].split()[0])}</text>'
             f'<text class="node-cap" x="{cx:.1f}" y="167" text-anchor="middle">'
-            f'{esc(time_range(s["s"], s["e"]).replace(" – ", "–"))}</text>')
+            f'{esc(time_range(s["s"], s["e"]).replace(" – ", "–"))}</text>'
+            f'</g>')
 
-    nowmark = ""
-    if 0 < elapsed < 100:
-        nowmark = (f'<line class="now-rule" x1="{now_x:.1f}" y1="16" x2="{now_x:.1f}" y2="138"/>'
-                   f'<text class="now-tag" x="{now_x + 7:.1f}" y="22">NOW</text>')
+    # Always present (JS toggles visibility each tick); the initial SSR
+    # position/visibility below is just this render's starting frame.
+    nowmark = (f'<g id="nowmark" style="display:{"block" if 0 < elapsed < 100 else "none"}">'
+               f'<line id="now-rule" class="now-rule" x1="{now_x:.1f}" y1="16" x2="{now_x:.1f}" y2="138"/>'
+               f'<text id="now-tag" class="now-tag" x="{now_x + 7:.1f}" y="22">NOW</text></g>')
 
-    return catmull_rom(pts), elapsed, nowmark, "".join(nodes) + "".join(caps)
+    return catmull_rom(pts), elapsed, nowmark, "".join(nodes), span_s, span_e
 
 
 # ── markup ────────────────────────────────────────────────────────────────
@@ -311,7 +384,7 @@ def render_stages(stages, pwa=False):
           {render_quest_actions(q, pwa)}
         </div>''' for q in s.get("quests", []))
         out.append(f'''
-    <div class="stage {s["_state"]}">
+    <div class="stage {s["_state"]}" data-s="{s["s"]}" data-e="{s["e"]}">
       <div class="idx">{i:02d}</div>
       <div>
         <div class="stage-name">{esc(s["name"])}<span class="tag">{esc(s.get("tag", ""))}</span></div>
@@ -363,7 +436,7 @@ def main():
 
     stages = data["stages"]
     cells = data.get("cells") or []
-    trail, elapsed, nowmark, nodes = build_route(stages, data["now"])
+    trail, elapsed, nowmark, nodes, span_s, span_e = build_route(stages, data["now"])
 
     n_quests = sum(len(s.get("quests", [])) for s in stages)
     n_triage = sum(len(c.get("items", [])) for c in cells[:3])
@@ -381,9 +454,12 @@ def main():
               .replace("__PWA_HEAD__", PWA_HEAD if pwa else "")
               .replace("__CAL_UI__", CAL_UI if pwa else "")
               .replace("__CAL_JS__", CAL_JS if pwa else "")
+              .replace("__LIVE_JS__", LIVE_JS if pwa else "")
               .replace("__RUN__", str(data.get("run", "")))
               .replace("__DATE__", esc(data.get("date", "")))
               .replace("__HEADLINE__", render_headline(data["headline"], data.get("emphasis")))
+              .replace("__SPAN_S__", str(span_s))
+              .replace("__SPAN_E__", str(span_e))
               .replace("__TRAIL__", trail)
               .replace("__ELAPSED__", f"{elapsed:.1f}")
               .replace("__NOWMARK__", nowmark)
